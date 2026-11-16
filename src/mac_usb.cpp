@@ -28,6 +28,15 @@ public:
     Object(Object&& other) noexcept : value(std::exchange(other.value, IO_OBJECT_NULL)) {}
 };
 
+template<class Ref> class CfOwned {
+public:
+    Ref value;
+    explicit CfOwned(Ref v) : value(v) {}
+    ~CfOwned() { if (value) CFRelease(value); }
+    CfOwned(const CfOwned&) = delete;
+    CfOwned& operator=(const CfOwned&) = delete;
+};
+
 void check(IOReturn result, const char* action) {
     if (result != kIOReturnSuccess)
         throw std::runtime_error(std::string(action) + ": IOKit " + hex(static_cast<std::uint32_t>(result), 8));
@@ -43,22 +52,20 @@ std::string cfstring(CFStringRef string) {
 }
 
 std::optional<std::uint32_t> number(io_registry_entry_t service, CFStringRef key) {
-    CFTypeRef property = IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0);
-    if (!property) return std::nullopt;
+    CfOwned<CFTypeRef> property(IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0));
+    if (!property.value) return std::nullopt;
     std::int64_t value = 0;
-    bool valid = CFGetTypeID(property) == CFNumberGetTypeID() &&
-                 CFNumberGetValue(static_cast<CFNumberRef>(property), kCFNumberSInt64Type, &value) &&
+    bool valid = CFGetTypeID(property.value) == CFNumberGetTypeID() &&
+                 CFNumberGetValue(static_cast<CFNumberRef>(property.value), kCFNumberSInt64Type, &value) &&
                  value >= INT32_MIN && value <= UINT32_MAX;
-    CFRelease(property);
     return valid ? std::optional<std::uint32_t>(static_cast<std::uint32_t>(value)) : std::nullopt;
 }
 
 std::string text(io_registry_entry_t service, CFStringRef key) {
-    CFTypeRef property = IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0);
-    if (!property) return "";
+    CfOwned<CFTypeRef> property(IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0));
+    if (!property.value) return "";
     std::string result;
-    if (CFGetTypeID(property) == CFStringGetTypeID()) result = cfstring(static_cast<CFStringRef>(property));
-    CFRelease(property);
+    if (CFGetTypeID(property.value) == CFStringGetTypeID()) result = cfstring(static_cast<CFStringRef>(property.value));
     return result;
 }
 
@@ -153,10 +160,12 @@ public:
     }
 };
 
-std::string configurations(UsbDevice& device) {
+Inspection configurations(UsbDevice& device) {
     UInt8 count = 0;
     check((*device.value)->GetNumberOfConfigurations(device.value, &count), "get cached configuration count");
+    if (!count) throw std::runtime_error("no cached USB configurations available");
     std::ostringstream out;
+    bool valid = true;
     out << '[';
     for (unsigned i = 0; i < count; ++i) {
         if (i) out << ',';
@@ -167,10 +176,12 @@ std::string configurations(UsbDevice& device) {
         auto raw = reinterpret_cast<const std::uint8_t*>(pointer);
         std::size_t size = std::size_t(raw[2]) | (std::size_t(raw[3]) << 8);
         if (size < 9) throw std::runtime_error("short cached configuration");
-        out << decode_configuration(Bytes(raw, raw + size));
+        auto evidence = configuration_evidence(Bytes(raw, raw + size));
+        valid = valid && evidence.valid;
+        out << evidence.json;
     }
     out << ']';
-    return out.str();
+    return {out.str(), valid};
 }
 
 Inspection vendor_status(UsbDevice& device) {
@@ -201,9 +212,8 @@ std::string audio_text(AudioObjectID id, AudioObjectPropertySelector selector) {
     CFStringRef value = nullptr;
     UInt32 size = sizeof(value);
     if (AudioObjectGetPropertyData(id, &address, 0, nullptr, &size, &value) != noErr) return "";
-    std::string result = cfstring(value);
-    if (value) CFRelease(value);
-    return result;
+    CfOwned<CFStringRef> guard(value);
+    return cfstring(guard.value);
 }
 
 std::string audio_channels(AudioDeviceID id, AudioObjectPropertyScope scope) {
@@ -284,10 +294,13 @@ Inspection inspect_mac(const ScanOptions& options) {
         if (options.descriptors || options.status) {
             try {
                 UsbDevice usb(device.service.value);
+                bool descriptors_valid = true;
                 if (options.descriptors) {
                     // Build first so an exception cannot leave a partially written JSON field.
                     auto config = configurations(usb);
-                    out << ",\"configurations\":" << config;
+                    descriptors_valid = config.usb_diagnostics_ok;
+                    usb_ok = usb_ok && descriptors_valid;
+                    out << ",\"configurations\":" << config.json;
                     UInt8 speed = 0;
                     if ((*usb.value)->GetDeviceSpeed(usb.value, &speed) == kIOReturnSuccess)
                         out << ",\"iokit_speed_code\":" << unsigned(speed);
@@ -296,6 +309,8 @@ Inspection inspect_mac(const ScanOptions& options) {
                     if (device.pid == twin_x_loader) {
                         usb_ok = false;
                         out << ",\"status_error\":\"FX3 loader: no vendor runtime commands were sent; firmware not uploaded\"";
+                    } else if (!descriptors_valid) {
+                        out << ",\"status_error\":\"not attempted: cached configuration validation failed\"";
                     } else {
                         auto status = vendor_status(usb);
                         usb_ok = usb_ok && status.usb_diagnostics_ok;

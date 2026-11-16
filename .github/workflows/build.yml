@@ -1,11 +1,16 @@
 name: Build and offline verification
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: apollo-verify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
@@ -24,11 +29,13 @@ jobs:
           python3 --version
       - name: Build and test protocol and CLI
         run: make -j2 test
+      - name: Static analysis of production code
+        run: make analyze
       - name: Exercise macOS inventory without Apollo hardware
         if: runner.os == 'macOS'
         run: |
           ./build/apollo-inspect --descriptors > build/cloud-inventory.json
-          python3 -c 'import json; d=json.load(open("build/cloud-inventory.json")); assert d["devices"] == []; assert not d["hardware_audio_verified"]; print("No Apollo attached: enumeration path only, no audio verified")'
+          python3 -c 'import json; d=json.load(open("build/cloud-inventory.json")); assert d["devices"] == []; assert d["usb_diagnostics_ok"]; assert d["process_arch"] == "arm64"; assert not d["hardware_audio_verified"]; print("ARM64 host, no Apollo attached: enumeration path only, no audio verified")'
       - name: Address and undefined-behavior sanitizers
         run: |
           c++ -std=c++17 -Iinclude -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer src/protocol.cpp tests/protocol_test.cpp -o build/protocol-sanitized
@@ -38,13 +45,21 @@ jobs:
         run: |
           codesign --force --sign - build/apollo-inspect
           codesign --verify --verbose build/apollo-inspect
-          shasum -a 256 build/apollo-inspect > build/SHA256SUMS
+      - name: Package and verify executable permissions and checksums
+        if: runner.os == 'macOS'
+        run: |
+          python3 tools/package.py --commit "$GITHUB_SHA" --platform '${{ matrix.os }}' --arch '${{ runner.arch }}'
+          mkdir -p build/package-check
+          tar -xzf build/apollo-inspect-${{ matrix.os }}-${{ runner.arch }}.tar.gz -C build/package-check
+          cd build/package-check
+          test -x apollo-inspect
+          shasum -a 256 -c SHA256SUMS
+          codesign --verify --verbose apollo-inspect
+          ./apollo-inspect --help
       - name: Save macOS research binary (not notarized, no installer)
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
           name: apollo-inspect-${{ matrix.os }}-${{ runner.arch }}
-          path: |
-            build/apollo-inspect
-            build/SHA256SUMS
+          path: build/apollo-inspect-${{ matrix.os }}-${{ runner.arch }}.tar.gz
           retention-days: 14

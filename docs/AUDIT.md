@@ -41,10 +41,54 @@
 во время запроса не проверены. IN-команды известны по upstream, не по нашему
 аппаратному тесту. audio_streaming_implemented и hardware_audio_verified остаются false.
 
-APLO2-анализатор проверяет формат/wordcount, но не доказывает полноту исходного
-capture: все правила sequence-number continuity не проверяются; формат не
-содержит проверяемой модели/firmware и не подтверждает ответы DSP. Его отчёт не
-разрешает replay: replay_safe всегда false. Реального capture Twin X у нас нет.
+APLO2-анализатор не доказывает полноту исходного capture: формат не содержит
+проверяемой модели/firmware и не подтверждает ответы DSP. Последующая проверка
+наблюдаемой последовательности кадров описана ниже. Его отчёт не разрешает replay:
+replay_safe всегда false. Реального capture Twin X у нас нет.
 
 Не добавлены OUT-запросы, firmware upload, DSP init, ResetDevice, seize,
 SetConfiguration, SetAlternateInterface или системные установки.
+
+## Повторная полная проверка перед первым тестом
+
+Повторно прочитаны оба C++ заголовка, все C++ исходники, Python-анализатор,
+тесты, Makefile, workflow, README и ограничения в документации. Среди доступных
+skills нет навыка для C++/IOKit driver review; UX/Figma skills к нему не применялись.
+Вся работа выполнена в облаке. Подробности запуска — [FIRST_TEST.md](FIRST_TEST.md).
+
+Дополнительные исправления:
+
+- Cached descriptor с ошибкой семантики сохраняется вместе с raw_hex и parse_error.
+  Ошибка остаётся ошибкой, не скрывается exit 0. Если одновременно запрошен status,
+  он не выполняется после этой ошибки. Недоступный cache по-прежнему сообщает ошибку.
+- Location разбирается по строгой грамматике: 1–8 hex digits с необязательным 0x.
+  std::stoull раньше принимал, например, пробелы и « -0»; теперь это ошибка аргумента
+  до обращения к платформенному backend.
+- CF-объекты освобождаются scope-guard при исключениях конвертации строк.
+- APLO2 wordcounts обрабатываются потоком без списка всех DSP-слов в памяти.
+  Сравнивается наблюдаемый host bulk sequence modulo 256 между flags. При разрыве,
+  повторе или reset выводятся метаданные, но opcodes/EEPROM-presence становятся null.
+  Не делается ложный вывод, что неизвестных записей не было. Сброс sequence может
+  быть допустимым новым сеансом; discrepancy сам по себе не доказывает потерю пакета.
+- Архив .tar.gz сохраняет mode 0755 для исполняемого файла. Исправлен прежний
+  manifest: строка build/apollo-inspect не соответствовала корню downloaded artifact.
+  Теперь SHA256SUMS ссылается на файлы относительно распакованного каталога.
+  Добавлены LICENSE, source commit metadata и короткая инструкция.
+- CI отдельно проверяет static analysis, ARM64 архитектуру, распаковку,
+  executable bit, checksums, подпись и --help из распакованного архива.
+  Push запускает CI только для main, PR проверяется своим event; одинаковые
+  ветки больше не занимают одновременно два набора runners.
+
+Локально в Linux-облаке проходят 24 Python-теста (один macOS-only пропускается),
+1425 C++ проверок и 10000 malformed-input случаев. GCC -fanalyzer компилирует
+production code; macOS CI запускает Clang Static Analyzer и ASan/UBSan. Конкретные
+результаты новой версии публикуются в Actions и не подменяются старым зелёным commit.
+
+У предыдущего commit e1970ac красный aggregate result вызван отсутствием runner
+для macOS 15: аннотация «The job was not acquired by Runner of type hosted even
+after multiple attempts». Его Linux/macOS 26 jobs прошли. Это инфраструктурная
+ошибка; проверка macOS 15 сохраняется, исключения для её результата не добавлены.
+
+Облако не проверяет USBDeviceOpen/USBInterfaceOpen с Twin X, фактический control
+transfer, hot-unplug устройства и звук. В первом пользовательском тесте используются
+IORegistry и cached descriptors, без status requests, установки или изменения безопасности.

@@ -61,6 +61,23 @@ std::uint16_t le16(const Bytes& data, std::size_t offset) {
     return std::uint16_t(data[offset]) | (std::uint16_t(data[offset + 1]) << 8);
 }
 
+std::uint32_t parse_location(const std::string& text) {
+    std::size_t first = text.rfind("0x", 0) == 0 || text.rfind("0X", 0) == 0 ? 2 : 0;
+    if (text.size() <= first || text.size() - first > 8)
+        throw std::invalid_argument("invalid 32-bit hexadecimal location");
+    std::uint32_t result = 0;
+    for (std::size_t i = first; i < text.size(); ++i) {
+        unsigned char c = text[i];
+        unsigned digit;
+        if (c >= '0' && c <= '9') digit = c - '0';
+        else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
+        else throw std::invalid_argument("invalid 32-bit hexadecimal location");
+        result = (result << 4) | digit;
+    }
+    return result;
+}
+
 std::uint32_t le32(const Bytes& data, std::size_t offset) {
     if (offset > data.size() || data.size() - offset < 4) throw std::invalid_argument("truncated u32");
     return std::uint32_t(data[offset]) | (std::uint32_t(data[offset + 1]) << 8) |
@@ -250,6 +267,16 @@ std::string decode_configuration(const Bytes& data) {
     if (defaults != interfaces) throw std::invalid_argument("interface missing default alternate setting 0");
     out << "]}";
     return out.str();
+}
+
+ConfigurationEvidence configuration_evidence(const Bytes& data) {
+    try {
+        return {decode_configuration(data), true};
+    } catch (const std::invalid_argument& error) {
+        std::ostringstream out;
+        out << "{\"raw_hex\":" << quote(hex_bytes(data)) << ",\"parse_error\":" << quote(error.what()) << '}';
+        return {out.str(), false};
+    }
 }
 }  // namespace apollo
 

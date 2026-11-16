@@ -22,6 +22,8 @@ It does not make the device appear in UA Connect or UAD Console. No audio succes
 - Actual macOS version/process architecture and existing Core Audio device inventory.
 - Offline APLO2 init-capture analyzer: control metadata, bulk command counts,
   cross-frame parsing, SHA-256 and EEPROM-opcode detection, with no replay function.
+  Observed sequence gaps/resets withhold command summaries instead of splicing
+  unknown data. This cannot establish that the original capture is complete.
 - Offline descriptor/status decoders and protocol tests. Tests use synthetic data,
   not an attached Apollo and not proof of audio functionality.
 
@@ -35,11 +37,14 @@ and are **not part of the first experiment**.
 
 GitHub Actions builds and tests on Linux, macOS 15 arm64, and macOS 26 arm64.
 The macOS jobs compile the real Apple backend and save an ad-hoc signed research
-CLI artifact. There is no installer, system extension, daemon or background service.
+CLI `.tar.gz` artifact with executable mode, archive-relative SHA256SUMS,
+source commit metadata, license and [first-test instructions](docs/FIRST_TEST.md).
+There is no installer, system extension, daemon or background service.
 Cloud CI has **no Apollo attached**. Its success cannot verify USB transfers or audio.
 
 ```sh
 make -j2 test
+make analyze
 ```
 
 Native macOS builds need Apple's Command Line Tools and system frameworks only;
@@ -51,6 +56,7 @@ Examples of offline use (HEX is data supplied by the researcher):
 ```sh
 build/apollo-inspect --decode-config HEX
 build/apollo-inspect --decode-status HEX
+build/apollo-inspect --inspect-config HEX
 python3 tools/analyze_init.py private/twin-x-init.seq
 ```
 
@@ -70,7 +76,10 @@ or audio works: inspect `devices` and error fields. Exit `2` and
 `usb_diagnostics_ok: false` mean requested descriptor/status work failed, including
 status requested from a loader. Exit `1` means an argument, discovery or selection
 error. Core Audio inventory errors are reported separately from the USB result.
-Offline malformed inputs return `1`.
+Strict offline decoders return `1` for malformed input. `--inspect-config` preserves
+the raw configuration and a parse error as JSON, with exit `2` when invalid.
+The macOS cached-descriptor mode also preserves parse errors and bytes; combined
+descriptor/status mode does not issue status reads after descriptor validation fails.
 
 No firmware uploader, DSP initializer, arbitrary request sender or audio stream is
 included. The Solo initialization must not be replayed on Twin X as a shortcut.

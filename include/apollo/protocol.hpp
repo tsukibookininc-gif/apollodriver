@@ -16,6 +16,7 @@ std::string quote(const std::string& value);
 std::string hex(std::uint64_t value, unsigned width = 0);
 std::string hex_bytes(const Bytes& data);
 Bytes unhex(const std::string& text);
+std::uint32_t parse_location(const std::string& text);
 std::uint16_t le16(const Bytes& data, std::size_t offset);
 std::uint32_t le32(const Bytes& data, std::size_t offset);
 
@@ -43,5 +44,11 @@ ReadSequenceResult read_known_status(const std::function<Bytes(Read)>& transport
 // Strict, offline descriptor parser. Unknown/class-specific records stay raw.
 // Endpoint addresses, altsets and channel counts are never guessed from Solo.
 std::string decode_configuration(const Bytes& data);
+struct ConfigurationEvidence {
+    std::string json;
+    bool valid;
+};
+// Preserve malformed cached bytes for diagnosis without treating them as valid.
+ConfigurationEvidence configuration_evidence(const Bytes& data);
 }  // namespace apollo
 
