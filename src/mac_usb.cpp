@@ -48,7 +48,7 @@ std::optional<std::uint32_t> number(io_registry_entry_t service, CFStringRef key
     std::int64_t value = 0;
     bool valid = CFGetTypeID(property) == CFNumberGetTypeID() &&
                  CFNumberGetValue(static_cast<CFNumberRef>(property), kCFNumberSInt64Type, &value) &&
-                 value >= 0 && value <= UINT32_MAX;
+                 value >= INT32_MIN && value <= UINT32_MAX;
     CFRelease(property);
     return valid ? std::optional<std::uint32_t>(static_cast<std::uint32_t>(value)) : std::nullopt;
 }

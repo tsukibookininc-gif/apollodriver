@@ -18,6 +18,8 @@ It does not make the device appear in UA Connect or UAD Console. No audio succes
   **five device-to-host reads**, bounded timeouts, no seize, and stop on first error.
 - Protocol/status/version/DSP boot-word decoding with malformed-reply rejection.
 - Actual macOS version/process architecture and existing Core Audio device inventory.
+- Offline APLO2 init-capture analyzer: control metadata, bulk command counts,
+  cross-frame parsing, SHA-256 and EEPROM-opcode detection, with no replay function.
 - Offline descriptor/status decoders and protocol tests. Tests use synthetic data,
   not an attached Apollo and not proof of audio functionality.
 
@@ -47,6 +49,7 @@ Examples of offline use (HEX is data supplied by the researcher):
 ```sh
 build/apollo-inspect --decode-config HEX
 build/apollo-inspect --decode-status HEX
+python3 tools/analyze_init.py private/twin-x-init.seq
 ```
 
 ## Hardware testing is pending
