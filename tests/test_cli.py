@@ -32,6 +32,22 @@ class CliTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("requires macOS", result.stderr)
 
+    def test_mac_no_target_does_not_start_status_reads(self):
+        if platform.system() != "Darwin":
+            self.skipTest("macOS discovery-only test")
+        scan = self.run_cli()
+        self.assertEqual(scan.returncode, 0, scan.stderr)
+        report = json.loads(scan.stdout)
+        if report["devices"]:
+            self.skipTest("Apollo present: never issue vendor reads from an automated test")
+        result = self.run_cli("--status")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("exactly one", result.stderr)
+        result = self.run_cli("--location", "deadbeef")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no Twin X USB", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

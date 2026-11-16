@@ -173,8 +173,9 @@ std::string configurations(UsbDevice& device) {
     return out.str();
 }
 
-std::string vendor_status(UsbDevice& device) {
-    IOUSBFindInterfaceRequest filter{kIOUSBFindInterfaceDontCare, kIOUSBFindInterfaceDontCare,
+Inspection vendor_status(UsbDevice& device) {
+    // Only create a user client for a vendor interface, never an audio interface.
+    IOUSBFindInterfaceRequest filter{0xff, kIOUSBFindInterfaceDontCare,
                                      kIOUSBFindInterfaceDontCare, kIOUSBFindInterfaceDontCare};
     io_iterator_t iterator = IO_OBJECT_NULL;
     check((*device.value)->CreateInterfaceIterator(device.value, &filter, &iterator), "enumerate active USB interfaces");
@@ -189,26 +190,8 @@ std::string vendor_status(UsbDevice& device) {
         // Never seize an interface from an existing driver and never change its altset.
         check((*iface.value)->USBInterfaceOpen(iface.value), "open vendor interface 0 without seize");
         iface.opened = true;
-        std::ostringstream out;
-        out << '{';
-        bool first = true;
-        for (auto kind : {Read::protocol, Read::status, Read::version_a, Read::version_b, Read::dsp0_boot}) {
-            if (!first) out << ',';
-            first = false;
-            out << quote(read_name(kind)) << ':';
-            try {
-                auto raw = iface.read(kind);
-                auto decoded = decode_read(kind, raw);
-                out << "{\"raw_hex\":" << quote(hex_bytes(raw)) << ",\"decoded\":" << decoded << '}';
-            } catch (const std::exception& error) {
-                out << "{\"error\":" << quote(error.what()) << '}';
-                // A stall or invalid reply does not justify more requests to an unknown state.
-                out << ",\"stopped_after_error\":true";
-                break;
-            }
-        }
-        out << '}';
-        return out.str();
+        auto result = read_known_status([&](Read kind) { return iface.read(kind); });
+        return {result.json, result.complete};
     }
     throw std::runtime_error("no vendor-class interface 0; device configuration was not changed");
 }
@@ -262,13 +245,16 @@ std::string audio_inventory() {
 }
 }  // namespace
 
-std::string inspect_mac(const ScanOptions& options) {
+Inspection inspect_mac(const ScanOptions& options) {
     auto devices = find_devices();
     std::size_t selected = 0;
     for (const auto& device : devices)
         if (!options.location || device.location == options.location) ++selected;
     if (options.status && selected != 1)
         throw std::runtime_error("--status requires exactly one Twin X USB; use --location HEX when multiple are attached");
+    if (options.location && selected == 0)
+        throw std::runtime_error("no Twin X USB at the specified location; no device opened");
+    bool usb_ok = true;
     std::ostringstream out;
     int arm64 = 0;
     std::size_t arm64_size = sizeof(arm64);
@@ -307,14 +293,17 @@ std::string inspect_mac(const ScanOptions& options) {
                         out << ",\"iokit_speed_code\":" << unsigned(speed);
                 }
                 if (options.status) {
-                    if (device.pid == twin_x_loader)
+                    if (device.pid == twin_x_loader) {
+                        usb_ok = false;
                         out << ",\"status_error\":\"FX3 loader: no vendor runtime commands were sent; firmware not uploaded\"";
-                    else {
+                    } else {
                         auto status = vendor_status(usb);
-                        out << ",\"vendor_reads\":" << status;
+                        usb_ok = usb_ok && status.usb_diagnostics_ok;
+                        out << ",\"vendor_reads\":" << status.json;
                     }
                 }
             } catch (const std::exception& error) {
+                usb_ok = false;
                 out << ",\"usb_error\":" << quote(error.what());
             }
         }
@@ -327,7 +316,7 @@ std::string inspect_mac(const ScanOptions& options) {
     } catch (const std::exception& error) {
         out << ",\"core_audio_error\":" << quote(error.what());
     }
-    out << '}';
-    return out.str();
+    out << ",\"usb_diagnostics_ok\":" << (usb_ok ? "true" : "false") << '}';
+    return {out.str(), usb_ok};
 }
 }  // namespace apollo

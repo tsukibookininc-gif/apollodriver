@@ -11,6 +11,10 @@ struct ScanOptions {
     std::optional<std::uint32_t> location;
 };
 // Returns JSON; errors remain errors and never become fabricated device data.
-std::string inspect_mac(const ScanOptions& options);
+struct Inspection {
+    std::string json;
+    bool usb_diagnostics_ok;
+};
+Inspection inspect_mac(const ScanOptions& options);
 }  // namespace apollo
 

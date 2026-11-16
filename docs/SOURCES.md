@@ -3,6 +3,8 @@
 Проверено 16 ноября 2026. База протокола зафиксирована на open-apollo
 [`6e0c5953c0f334dec17bcf0b34261263cad8acfd`](https://github.com/rolotrealanis98/open-apollo/tree/6e0c5953c0f334dec17bcf0b34261263cad8acfd).
 Это источники реализации и выводов, а не заявление о совместимости Twin X с macOS.
+Дополнительные источники аппаратуры и анализа Windows/macOS перечислены в
+[HARDWARE.md](HARDWARE.md); проверка нашего кода — в [AUDIT.md](AUDIT.md).
 
 ## Исходники open-apollo — GPL-2.0
 

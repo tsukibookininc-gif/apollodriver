@@ -14,6 +14,8 @@ It does not make the device appear in UA Connect or UAD Console. No audio succes
   and `2b5a:000f` (Twin X USB runtime USB identity).
 - Cached configuration descriptor inspection: interfaces, alternate settings,
   endpoint direction/type/packet sizes, SuperSpeed companions and original bytes.
+- UAC2 channel/format/subslot decoding and consistency checks for interface and
+  endpoint counts, duplicate alternate settings and orphan companions.
 - Native IOKit/IOUSBLib vendor-interface transport with an exact allowlist of
   **five device-to-host reads**, bounded timeouts, no seize, and stop on first error.
 - Protocol/status/version/DSP boot-word decoding with malformed-reply rejection.
@@ -58,6 +60,14 @@ No command has been run on the owner's Mac. No firmware or DSP data has been sen
 First collect macOS's existing System Information USB view; then, only when the
 owner chooses to run the tool, use the default scan and cached descriptors.
 See [the research report](docs/RESEARCH.md) for evidence, limits and the next experiment.
+See also [hardware evidence](docs/HARDWARE.md) and [the code audit](docs/AUDIT.md).
+
+Live-mode exit `0` means USB inspection completed, **not** that Apollo was found
+or audio works: inspect `devices` and error fields. Exit `2` and
+`usb_diagnostics_ok: false` mean requested descriptor/status work failed, including
+status requested from a loader. Exit `1` means an argument, discovery or selection
+error. Core Audio inventory errors are reported separately from the USB result.
+Offline malformed inputs return `1`.
 
 No firmware uploader, DSP initializer, arbitrary request sender or audio stream is
 included. The Solo initialization must not be replayed on Twin X as a shortcut.

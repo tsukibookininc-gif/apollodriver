@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,12 @@ ReadRequest request_for(Read kind);
 bool allowed(const ReadRequest& request);
 std::string read_name(Read kind);
 std::string decode_read(Read kind, const Bytes& data);
+struct ReadSequenceResult {
+    std::string json;
+    bool complete;
+};
+// Shared fault handling, also exercised offline with explicitly synthetic replies.
+ReadSequenceResult read_known_status(const std::function<Bytes(Read)>& transport);
 
 // Strict, offline descriptor parser. Unknown/class-specific records stay raw.
 // Endpoint addresses, altsets and channel counts are never guessed from Solo.

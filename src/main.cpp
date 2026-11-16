@@ -42,8 +42,9 @@ int main(int argc, char** argv) {
             } else throw std::invalid_argument("unknown/incomplete argument: " + arg);
         }
 #ifdef __APPLE__
-        std::cout << apollo::inspect_mac(options) << '\n';
-        return 0;
+        auto result = apollo::inspect_mac(options);
+        std::cout << result.json << '\n';
+        return result.usb_diagnostics_ok ? 0 : 2;
 #else
         throw std::runtime_error("live USB backend requires macOS; offline decoders work on this OS");
 #endif
