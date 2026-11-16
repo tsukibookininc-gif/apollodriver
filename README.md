@@ -61,6 +61,9 @@ First collect macOS's existing System Information USB view; then, only when the
 owner chooses to run the tool, use the default scan and cached descriptors.
 See [the research report](docs/RESEARCH.md) for evidence, limits and the next experiment.
 See also [hardware evidence](docs/HARDWARE.md) and [the code audit](docs/AUDIT.md).
+The [detection and registration note](docs/DETECTION.md) records the owner's
+existing official macOS installation and distinguishes USB discovery from Console
+recognition and UA registration.
 
 Live-mode exit `0` means USB inspection completed, **not** that Apollo was found
 or audio works: inspect `devices` and error fields. Exit `2` and
