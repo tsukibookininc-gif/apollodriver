@@ -23,6 +23,30 @@
 Рабочая частота, адреса DSP и содержимое FPGA не следуют из названия SHARC.
 Вскрывать карту владельца для разработки USB-драйвера сейчас не требуется.
 
+## Сравнение с Apollo Twin X Thunderbolt
+
+У той же мастерской есть [разбор Twin X от 3 июня 2024](https://dhvan-assistenciatecnica.blogspot.com/2024/06/interface-de-audio-universal-audio.html).
+Просмотрены `IMG_1096.JPEG` (CPU/DSP) и `IMG_1102.JPEG` (задняя панель с обозначением
+Thunderbolt). Это другой конкретный экземпляр/ревизия, не обобщение всех поколений.
+
+| По фотографиям двух экземпляров | Twin X USB, публикация 2025 | Twin X Thunderbolt, публикация 2024 |
+| --- | --- | --- |
+| DSP | 2 × ADSP-21489 | 2 × ADSP-21469 |
+| FPGA | GOWIN, семейство GW2A | Xilinx Spartan-6, XC6SLX45T |
+| MCU | ST ARM / STM32, точный suffix не установлен | STM32F103, маркировка ZET6 |
+| CPU/DSP-плата | Наклейка 10006254 Rev 4, PCB10007135 REV001 | Наклейка 10002886 Rev 6, 10003416 REV002 |
+
+Для роли Spartan-6 сверена [страница производителя AMD/Xilinx](https://www.amd.com/en/products/adaptive-socs-and-fpgas/fpga/spartan-6.html),
+а для второго DSP — [Analog Devices ADSP-21469](https://www.analog.com/en/products/adsp-21469.html).
+Чипы 21469/21489 принадлежат SHARC: ADI сообщает о совместимости семейства по коду.
+Это **не** гарантирует одинаковых memory maps, загрузочных ресурсов, FPGA-адресов
+или порядка инициализации конкретных плат UA. Сходный DSP command language полезно
+сравнивать, но firmware и USB transport необходимо проверять на целевой модели.
+
+Сравнение показало, что различие этих плат шире замены внешнего разъёма. Оно не
+доказывает невозможность драйвера, но исключает предположение о простой замене
+VID/PID в Thunderbolt-драйвере. Перестановка плат или физическая переделка не планируются.
+
 [Каталог руководств UA](https://help.uaudio.com/hc/en-us/articles/13446310879892-Apollo-Hardware-Manuals)
 даёт отдельный PDF Twin X USB. Сервер media.uaudio.com возвращал 403, поэтому полный
 PDF/блок-схема не считаются независимо прочитанными первоисточниками в этой итерации.
