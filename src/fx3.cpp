@@ -40,7 +40,8 @@ Fx3Image parse_fx3(const Bytes& data) {
         throw std::invalid_argument("only CY/B0 checksum images are supported");
     if ((data[2] & 0xc1) || (data[2] & 0x30) == 0x30)
         throw std::invalid_argument("reserved image bits/clock setting or non-executable image");
-    Fx3Image image{data[2], 0, 0, {}};
+    Fx3Image image;
+    image.control = data.at(2);
     std::size_t offset = 4;
     std::uint32_t checksum = 0;
     for (;;) {
@@ -144,6 +145,7 @@ std::string fx3_progress(const Fx3Progress& p) {
     out << "{\"writes_attempted\":" << p.writes_attempted << ",\"writes_completed\":" << p.writes_completed
         << ",\"readbacks_verified\":" << p.readbacks_verified << ",\"jump_attempted\":" << (p.jump_attempted ? "true" : "false")
         << ",\"jump_acknowledged\":" << (p.jump_acknowledged ? "true" : "false") << '}';
-    return out.str();
+    const std::string result = out.str();
+    return result;
 }
 }  // namespace apollo

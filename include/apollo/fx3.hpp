@@ -10,10 +10,10 @@ constexpr std::size_t fx3_chunk_size = 4096;
 constexpr const char* twin_x_image_sha256 =
     "bdd9db3f2d139f615c4f1e4e0261d24d90a6f95f8c6e1afe34e0c1a8fbd35fcc";
 
-struct Fx3Section { std::uint32_t address; std::size_t offset, length; };
+struct Fx3Section { std::uint32_t address = 0; std::size_t offset = 0, length = 0; };
 struct Fx3Image {
-    std::uint8_t control;
-    std::uint32_t checksum, entrypoint;
+    std::uint8_t control = 0;
+    std::uint32_t checksum = 0, entrypoint = 0;
     std::vector<Fx3Section> sections;
 };
 std::string sha256(const Bytes& data);
@@ -25,7 +25,7 @@ std::string fx3_plan(const Bytes& data);
 
 struct Fx3Request {
     std::uint8_t type = 0x40, request = 0xa0;
-    std::uint16_t value, index, length;
+    std::uint16_t value = 0, index = 0, length = 0;
 };
 struct Fx3Reply { std::size_t transferred; Bytes data; };
 using Fx3Control = std::function<Fx3Reply(const Fx3Request&, const Bytes&)>;
