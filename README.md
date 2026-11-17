@@ -4,7 +4,8 @@ Experimental, native macOS USB driver research for **Apollo Twin X USB** on Appl
 This is an early USB transport implementation, **not a working Core Audio sound driver**.
 It does not make the device appear in UA Connect or UAD Console. No audio success is claimed.
 
-Разработка ведётся в облаке. На Mac владельца ничего не установлено и не запущено.
+Разработка ведётся в облаке. Владелец самостоятельно скачал утилиту и выполнил
+проверку IORegistry и cached descriptors; системные компоненты проекта не устанавливались.
 Цель — сначала подтвердить USB-протокол именно Twin X USB, затем воспроизведение,
 после него запись. Работоспособность звука на M5 пока **не подтверждена**.
 
@@ -60,16 +61,20 @@ build/apollo-inspect --inspect-config HEX
 python3 tools/analyze_init.py private/twin-x-init.seq
 ```
 
-## Hardware testing is pending
+## First owner-run hardware observation
 
-No command has been run on the owner's Mac. No firmware or DSP data has been sent.
-First collect macOS's existing System Information USB view; then, only when the
-owner chooses to run the tool, use the default scan and cached descriptors.
+The owner supplied screenshots of successful default and cached-descriptor scans
+on the M5 Mac. The device reports `2b5a:000e`, `WestBridge`, one vendor-class
+interface and no additional endpoints, consistent with the FX3 loader stage.
+There are no audio interfaces in this configuration and no Apollo in the reported
+Core Audio inventory. This verifies discovery and cached inspection only;
+runtime USB, vendor transfers, firmware/DSP initialization and audio remain unverified.
+No firmware or DSP data has been sent by this tool.
 See [the research report](docs/RESEARCH.md) for evidence, limits and the next experiment.
 See also [hardware evidence](docs/HARDWARE.md) and [the code audit](docs/AUDIT.md).
-The [detection and registration note](docs/DETECTION.md) records the owner's
-existing official macOS installation and distinguishes USB discovery from Console
-recognition and UA registration.
+The [detection and registration note](docs/DETECTION.md) records the observations,
+the boot-image source needed next, and the distinction between USB discovery,
+Console recognition and UA registration. No new download is needed for this result.
 
 Live-mode exit `0` means USB inspection completed, **not** that Apollo was found
 or audio works: inspect `devices` and error fields. Exit `2` and
