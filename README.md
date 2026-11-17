@@ -82,6 +82,10 @@ See also [hardware evidence](docs/HARDWARE.md) and [the code audit](docs/AUDIT.m
 The [detection and registration note](docs/DETECTION.md) records the observations,
 the boot-image source needed next, and the distinction between USB discovery,
 Console recognition and UA registration. No new download is needed for this result.
+The owner subsequently ran the offline boot plan successfully and requested a
+safer next step. [Offline USB-table analysis](docs/OFFLINE_USB.md) identifies two
+configuration candidates inside the private image without executing it or touching
+hardware. RAM writes and firmware execution remain deferred and unapproved.
 
 Live-mode exit `0` means USB inspection completed, **not** that Apollo was found
 or audio works: inspect `devices` and error fields. Exit `2` and
