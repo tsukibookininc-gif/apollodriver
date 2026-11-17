@@ -140,12 +140,4 @@ void transfer_fx3_ram(const Bytes& data, const Fx3Control& control, Fx3Progress&
     progress.jump_acknowledged = true;
 }
 
-std::string fx3_progress(const Fx3Progress& p) {
-    std::ostringstream out;
-    out << "{\"writes_attempted\":" << p.writes_attempted << ",\"writes_completed\":" << p.writes_completed
-        << ",\"readbacks_verified\":" << p.readbacks_verified << ",\"jump_attempted\":" << (p.jump_attempted ? "true" : "false")
-        << ",\"jump_acknowledged\":" << (p.jump_acknowledged ? "true" : "false") << '}';
-    const std::string result = out.str();
-    return result;
-}
 }  // namespace apollo

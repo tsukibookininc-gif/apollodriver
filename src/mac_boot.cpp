@@ -170,7 +170,12 @@ std::string boot_mac(const Bytes& data, std::uint32_t location, bool& runtime_ob
     }
     std::ostringstream out;
     out << "{\"schema_version\":1,\"mode\":\"explicit_fx3_ram_boot\",\"image_sha256\":" << quote(sha256(data))
-        << ",\"location\":" << quote(hex(location, 8)) << ",\"progress\":" << fx3_progress(progress)
+        << ",\"location\":" << quote(hex(location, 8))
+        << ",\"progress\":{\"writes_attempted\":" << progress.writes_attempted
+        << ",\"writes_completed\":" << progress.writes_completed
+        << ",\"readbacks_verified\":" << progress.readbacks_verified
+        << ",\"jump_attempted\":" << (progress.jump_attempted ? "true" : "false")
+        << ",\"jump_acknowledged\":" << (progress.jump_acknowledged ? "true" : "false") << '}'
         << ",\"runtime_observed\":" << (runtime_observed ? "true" : "false")
         << ",\"transfer_error\":" << (transfer_error.empty() ? "null" : quote(transfer_error))
         << ",\"observation_error\":" << (observation_error.empty() ? "null" : quote(observation_error))

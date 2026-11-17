@@ -36,7 +36,6 @@ struct Fx3Progress {
 // Injectable sequencing only. Native execution separately requires the pinned
 // Twin X image and explicit command-line confirmation before opening any device.
 void transfer_fx3_ram(const Bytes& data, const Fx3Control& control, Fx3Progress& progress);
-std::string fx3_progress(const Fx3Progress& progress);
 
 // macOS implementation; observes runtime identity, never claims working audio.
 std::string boot_mac(const Bytes& data, std::uint32_t location, bool& runtime_observed);
