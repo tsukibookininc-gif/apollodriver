@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <iomanip>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 
@@ -58,6 +59,23 @@ Bytes unhex(const std::string& text) {
 std::uint16_t le16(const Bytes& data, std::size_t offset) {
     if (offset > data.size() || data.size() - offset < 2) throw std::invalid_argument("truncated u16");
     return std::uint16_t(data[offset]) | (std::uint16_t(data[offset + 1]) << 8);
+}
+
+std::uint32_t parse_location(const std::string& text) {
+    std::size_t first = text.rfind("0x", 0) == 0 || text.rfind("0X", 0) == 0 ? 2 : 0;
+    if (text.size() <= first || text.size() - first > 8)
+        throw std::invalid_argument("invalid 32-bit hexadecimal location");
+    std::uint32_t result = 0;
+    for (std::size_t i = first; i < text.size(); ++i) {
+        unsigned char c = text[i];
+        unsigned digit;
+        if (c >= '0' && c <= '9') digit = c - '0';
+        else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
+        else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
+        else throw std::invalid_argument("invalid 32-bit hexadecimal location");
+        result = (result << 4) | digit;
+    }
+    return result;
 }
 
 std::uint32_t le32(const Bytes& data, std::size_t offset) {
@@ -120,6 +138,29 @@ std::string decode_read(Read kind, const Bytes& data) {
     return out.str();
 }
 
+ReadSequenceResult read_known_status(const std::function<Bytes(Read)>& transport) {
+    std::ostringstream out;
+    bool first = true;
+    bool complete = true;
+    out << '{';
+    for (auto kind : {Read::protocol, Read::status, Read::version_a, Read::version_b, Read::dsp0_boot}) {
+        if (!first) out << ',';
+        first = false;
+        out << quote(read_name(kind)) << ':';
+        try {
+            auto raw = transport(kind);
+            auto decoded = decode_read(kind, raw);
+            out << "{\"raw_hex\":" << quote(hex_bytes(raw)) << ",\"decoded\":" << decoded << '}';
+        } catch (const std::exception& error) {
+            complete = false;
+            out << "{\"error\":" << quote(error.what()) << "},\"stopped_after_error\":true";
+            break;
+        }
+    }
+    out << '}';
+    return {out.str(), complete};
+}
+
 std::string decode_configuration(const Bytes& data) {
     if (data.size() < 9 || data[0] != 9 || data[1] != 2) throw std::invalid_argument("invalid configuration header");
     auto total = le16(data, 2);
@@ -129,6 +170,15 @@ std::string decode_configuration(const Bytes& data) {
         << ",\"total_length\":" << total << ",\"raw_hex\":" << quote(hex_bytes(data)) << ",\"records\":[";
     bool first = true;
     int interface = -1, alternate = -1;
+    unsigned endpoint_count = 0, expected_endpoints = 0;
+    unsigned interface_class = 0, subclass = 0, protocol = 0;
+    unsigned previous_type = 0, endpoint_address = 0;
+    std::set<unsigned> interfaces, defaults, endpoints;
+    std::set<std::pair<unsigned, unsigned>> alternate_settings;
+    auto finish_interface = [&] {
+        if (interface >= 0 && endpoint_count != expected_endpoints)
+            throw std::invalid_argument("interface endpoint count mismatch");
+    };
     for (std::size_t p = 0; p < data.size();) {
         if (data.size() - p < 2) throw std::invalid_argument("truncated descriptor header");
         auto len = data[p];
@@ -141,7 +191,16 @@ std::string decode_configuration(const Bytes& data) {
             << ",\"raw_hex\":" << quote(hex_bytes(raw));
         if (type == 4) {
             if (len < 9) throw std::invalid_argument("short interface descriptor");
+            finish_interface();
             interface = data[p + 2]; alternate = data[p + 3];
+            if (!alternate_settings.emplace(interface, alternate).second)
+                throw std::invalid_argument("duplicate interface alternate setting");
+            interfaces.insert(interface);
+            if (alternate == 0) defaults.insert(interface);
+            endpoint_count = 0;
+            expected_endpoints = data[p + 4];
+            endpoints.clear();
+            interface_class = data[p + 5]; subclass = data[p + 6]; protocol = data[p + 7];
             out << ",\"interface\":" << interface << ",\"alternate\":" << alternate
                 << ",\"endpoint_count\":" << unsigned(data[p + 4])
                 << ",\"class\":" << unsigned(data[p + 5])
@@ -150,6 +209,10 @@ std::string decode_configuration(const Bytes& data) {
         } else if (type == 5) {
             if (len < 7 || interface < 0) throw std::invalid_argument("short or orphan endpoint descriptor");
             auto address = data[p + 2];
+            if (!(address & 0x0f) || (address & 0x70) || !endpoints.insert(address).second)
+                throw std::invalid_argument("invalid or duplicate endpoint address");
+            ++endpoint_count;
+            endpoint_address = address;
             unsigned attributes = data[p + 3];
             static const char* types[] = {"control", "isochronous", "bulk", "interrupt"};
             out << ",\"interface\":" << interface << ",\"alternate\":" << alternate
@@ -161,16 +224,59 @@ std::string decode_configuration(const Bytes& data) {
                 << ",\"max_packet_size_raw\":" << le16(data, p + 4)
                 << ",\"interval\":" << unsigned(data[p + 6]);
         } else if (type == 48) {
-            if (len < 6) throw std::invalid_argument("short SuperSpeed endpoint companion");
-            out << ",\"max_burst\":" << unsigned(data[p + 2])
+            if (len < 6 || previous_type != 5) throw std::invalid_argument("short or orphan SuperSpeed endpoint companion");
+            out << ",\"interface\":" << interface << ",\"alternate\":" << alternate
+                << ",\"endpoint_address\":" << quote(hex(endpoint_address, 2))
+                << ",\"max_burst\":" << unsigned(data[p + 2])
                 << ",\"attributes\":" << unsigned(data[p + 3])
                 << ",\"bytes_per_interval\":" << le16(data, p + 4);
+        } else if (type == 0x24 && interface_class == 1 && protocol == 0x20) {
+            if (len < 3) throw std::invalid_argument("short UAC2 class-specific descriptor");
+            unsigned subtype = data[p + 2];
+            if (subclass == 2 && subtype == 1) {
+                if (len != 16) throw std::invalid_argument("invalid UAC2 AS_GENERAL length");
+                out << ",\"uac2_subtype\":\"as_general\",\"terminal_link\":" << unsigned(data[p + 3])
+                    << ",\"format_type\":" << unsigned(data[p + 5])
+                    << ",\"format_bitmap\":" << quote(hex(le32(data, p + 6), 8))
+                    << ",\"channels\":" << unsigned(data[p + 10])
+                    << ",\"channel_config\":" << quote(hex(le32(data, p + 11), 8));
+            } else if (subclass == 2 && subtype == 2) {
+                if (len < 4) throw std::invalid_argument("short UAC2 format descriptor");
+                if (data[p + 3] == 1) {
+                    if (len != 6 || data[p + 4] < 1 || data[p + 4] > 4 ||
+                        data[p + 5] == 0 || data[p + 5] > 8 * data[p + 4])
+                        throw std::invalid_argument("invalid UAC2 Type I sample width");
+                    out << ",\"uac2_subtype\":\"format_type_i\",\"subslot_bytes\":" << unsigned(data[p + 4])
+                        << ",\"bit_resolution\":" << unsigned(data[p + 5]);
+                }
+            } else if (subclass == 1 && subtype == 0x0a) {
+                if (len != 8) throw std::invalid_argument("invalid UAC2 clock-source length");
+                out << ",\"uac2_subtype\":\"clock_source\",\"clock_id\":" << unsigned(data[p + 3])
+                    << ",\"clock_attributes\":" << unsigned(data[p + 4])
+                    << ",\"clock_controls\":" << unsigned(data[p + 5]);
+            }
+        } else if (type == 2 && p != 0) {
+            throw std::invalid_argument("nested configuration descriptor");
         }
         out << '}';
+        previous_type = type;
         p += len;
     }
+    finish_interface();
+    if (interfaces.size() != data[4]) throw std::invalid_argument("configuration interface count mismatch");
+    if (defaults != interfaces) throw std::invalid_argument("interface missing default alternate setting 0");
     out << "]}";
     return out.str();
+}
+
+ConfigurationEvidence configuration_evidence(const Bytes& data) {
+    try {
+        return {decode_configuration(data), true};
+    } catch (const std::invalid_argument& error) {
+        std::ostringstream out;
+        out << "{\"raw_hex\":" << quote(hex_bytes(data)) << ",\"parse_error\":" << quote(error.what()) << '}';
+        return {out.str(), false};
+    }
 }
 }  // namespace apollo
 

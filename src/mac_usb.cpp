@@ -28,6 +28,15 @@ public:
     Object(Object&& other) noexcept : value(std::exchange(other.value, IO_OBJECT_NULL)) {}
 };
 
+template<class Ref> class CfOwned {
+public:
+    Ref value;
+    explicit CfOwned(Ref v) : value(v) {}
+    ~CfOwned() { if (value) CFRelease(value); }
+    CfOwned(const CfOwned&) = delete;
+    CfOwned& operator=(const CfOwned&) = delete;
+};
+
 void check(IOReturn result, const char* action) {
     if (result != kIOReturnSuccess)
         throw std::runtime_error(std::string(action) + ": IOKit " + hex(static_cast<std::uint32_t>(result), 8));
@@ -43,22 +52,20 @@ std::string cfstring(CFStringRef string) {
 }
 
 std::optional<std::uint32_t> number(io_registry_entry_t service, CFStringRef key) {
-    CFTypeRef property = IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0);
-    if (!property) return std::nullopt;
+    CfOwned<CFTypeRef> property(IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0));
+    if (!property.value) return std::nullopt;
     std::int64_t value = 0;
-    bool valid = CFGetTypeID(property) == CFNumberGetTypeID() &&
-                 CFNumberGetValue(static_cast<CFNumberRef>(property), kCFNumberSInt64Type, &value) &&
+    bool valid = CFGetTypeID(property.value) == CFNumberGetTypeID() &&
+                 CFNumberGetValue(static_cast<CFNumberRef>(property.value), kCFNumberSInt64Type, &value) &&
                  value >= INT32_MIN && value <= UINT32_MAX;
-    CFRelease(property);
     return valid ? std::optional<std::uint32_t>(static_cast<std::uint32_t>(value)) : std::nullopt;
 }
 
 std::string text(io_registry_entry_t service, CFStringRef key) {
-    CFTypeRef property = IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0);
-    if (!property) return "";
+    CfOwned<CFTypeRef> property(IORegistryEntryCreateCFProperty(service, key, kCFAllocatorDefault, 0));
+    if (!property.value) return "";
     std::string result;
-    if (CFGetTypeID(property) == CFStringGetTypeID()) result = cfstring(static_cast<CFStringRef>(property));
-    CFRelease(property);
+    if (CFGetTypeID(property.value) == CFStringGetTypeID()) result = cfstring(static_cast<CFStringRef>(property.value));
     return result;
 }
 
@@ -153,10 +160,12 @@ public:
     }
 };
 
-std::string configurations(UsbDevice& device) {
+Inspection configurations(UsbDevice& device) {
     UInt8 count = 0;
     check((*device.value)->GetNumberOfConfigurations(device.value, &count), "get cached configuration count");
+    if (!count) throw std::runtime_error("no cached USB configurations available");
     std::ostringstream out;
+    bool valid = true;
     out << '[';
     for (unsigned i = 0; i < count; ++i) {
         if (i) out << ',';
@@ -167,14 +176,17 @@ std::string configurations(UsbDevice& device) {
         auto raw = reinterpret_cast<const std::uint8_t*>(pointer);
         std::size_t size = std::size_t(raw[2]) | (std::size_t(raw[3]) << 8);
         if (size < 9) throw std::runtime_error("short cached configuration");
-        out << decode_configuration(Bytes(raw, raw + size));
+        auto evidence = configuration_evidence(Bytes(raw, raw + size));
+        valid = valid && evidence.valid;
+        out << evidence.json;
     }
     out << ']';
-    return out.str();
+    return {out.str(), valid};
 }
 
-std::string vendor_status(UsbDevice& device) {
-    IOUSBFindInterfaceRequest filter{kIOUSBFindInterfaceDontCare, kIOUSBFindInterfaceDontCare,
+Inspection vendor_status(UsbDevice& device) {
+    // Only create a user client for a vendor interface, never an audio interface.
+    IOUSBFindInterfaceRequest filter{0xff, kIOUSBFindInterfaceDontCare,
                                      kIOUSBFindInterfaceDontCare, kIOUSBFindInterfaceDontCare};
     io_iterator_t iterator = IO_OBJECT_NULL;
     check((*device.value)->CreateInterfaceIterator(device.value, &filter, &iterator), "enumerate active USB interfaces");
@@ -189,26 +201,8 @@ std::string vendor_status(UsbDevice& device) {
         // Never seize an interface from an existing driver and never change its altset.
         check((*iface.value)->USBInterfaceOpen(iface.value), "open vendor interface 0 without seize");
         iface.opened = true;
-        std::ostringstream out;
-        out << '{';
-        bool first = true;
-        for (auto kind : {Read::protocol, Read::status, Read::version_a, Read::version_b, Read::dsp0_boot}) {
-            if (!first) out << ',';
-            first = false;
-            out << quote(read_name(kind)) << ':';
-            try {
-                auto raw = iface.read(kind);
-                auto decoded = decode_read(kind, raw);
-                out << "{\"raw_hex\":" << quote(hex_bytes(raw)) << ",\"decoded\":" << decoded << '}';
-            } catch (const std::exception& error) {
-                out << "{\"error\":" << quote(error.what()) << '}';
-                // A stall or invalid reply does not justify more requests to an unknown state.
-                out << ",\"stopped_after_error\":true";
-                break;
-            }
-        }
-        out << '}';
-        return out.str();
+        auto result = read_known_status([&](Read kind) { return iface.read(kind); });
+        return {result.json, result.complete};
     }
     throw std::runtime_error("no vendor-class interface 0; device configuration was not changed");
 }
@@ -218,9 +212,8 @@ std::string audio_text(AudioObjectID id, AudioObjectPropertySelector selector) {
     CFStringRef value = nullptr;
     UInt32 size = sizeof(value);
     if (AudioObjectGetPropertyData(id, &address, 0, nullptr, &size, &value) != noErr) return "";
-    std::string result = cfstring(value);
-    if (value) CFRelease(value);
-    return result;
+    CfOwned<CFStringRef> guard(value);
+    return cfstring(guard.value);
 }
 
 std::string audio_channels(AudioDeviceID id, AudioObjectPropertyScope scope) {
@@ -262,13 +255,16 @@ std::string audio_inventory() {
 }
 }  // namespace
 
-std::string inspect_mac(const ScanOptions& options) {
+Inspection inspect_mac(const ScanOptions& options) {
     auto devices = find_devices();
     std::size_t selected = 0;
     for (const auto& device : devices)
         if (!options.location || device.location == options.location) ++selected;
     if (options.status && selected != 1)
         throw std::runtime_error("--status requires exactly one Twin X USB; use --location HEX when multiple are attached");
+    if (options.location && selected == 0)
+        throw std::runtime_error("no Twin X USB at the specified location; no device opened");
+    bool usb_ok = true;
     std::ostringstream out;
     int arm64 = 0;
     std::size_t arm64_size = sizeof(arm64);
@@ -298,23 +294,31 @@ std::string inspect_mac(const ScanOptions& options) {
         if (options.descriptors || options.status) {
             try {
                 UsbDevice usb(device.service.value);
+                bool descriptors_valid = true;
                 if (options.descriptors) {
                     // Build first so an exception cannot leave a partially written JSON field.
                     auto config = configurations(usb);
-                    out << ",\"configurations\":" << config;
+                    descriptors_valid = config.usb_diagnostics_ok;
+                    usb_ok = usb_ok && descriptors_valid;
+                    out << ",\"configurations\":" << config.json;
                     UInt8 speed = 0;
                     if ((*usb.value)->GetDeviceSpeed(usb.value, &speed) == kIOReturnSuccess)
                         out << ",\"iokit_speed_code\":" << unsigned(speed);
                 }
                 if (options.status) {
-                    if (device.pid == twin_x_loader)
+                    if (device.pid == twin_x_loader) {
+                        usb_ok = false;
                         out << ",\"status_error\":\"FX3 loader: no vendor runtime commands were sent; firmware not uploaded\"";
-                    else {
+                    } else if (!descriptors_valid) {
+                        out << ",\"status_error\":\"not attempted: cached configuration validation failed\"";
+                    } else {
                         auto status = vendor_status(usb);
-                        out << ",\"vendor_reads\":" << status;
+                        usb_ok = usb_ok && status.usb_diagnostics_ok;
+                        out << ",\"vendor_reads\":" << status.json;
                     }
                 }
             } catch (const std::exception& error) {
+                usb_ok = false;
                 out << ",\"usb_error\":" << quote(error.what());
             }
         }
@@ -327,7 +331,7 @@ std::string inspect_mac(const ScanOptions& options) {
     } catch (const std::exception& error) {
         out << ",\"core_audio_error\":" << quote(error.what());
     }
-    out << '}';
-    return out.str();
+    out << ",\"usb_diagnostics_ok\":" << (usb_ok ? "true" : "false") << '}';
+    return {out.str(), usb_ok};
 }
 }  // namespace apollo

@@ -30,11 +30,28 @@ class CaptureTests(unittest.TestCase):
 
     def test_flag_streams_are_separate(self):
         data = capture(event(struct.pack("<I", 0x00110002), flags=0),
-                       event(struct.pack("<I", 0x00270001), flags=0x10),
-                       event(struct.pack("<I", 123), flags=0))
+                       event(struct.pack("<I", 0x00270001), flags=0x10, sequence=1),
+                       event(struct.pack("<I", 123), flags=0, sequence=2))
         result = module.analyze(data)
         self.assertEqual(result["streams_by_flags"]["0x00"]["opcodes"], {"0x0011": 1})
         self.assertFalse(result["streams_by_flags"]["0x10"]["flags_semantics_verified"])
+
+    def test_sequence_gap_does_not_splice_commands_or_report_false_absence_of_writes(self):
+        data = capture(event(struct.pack("<I", 0x00110002), sequence=0),
+                       event(struct.pack("<I", 123), sequence=2))
+        result = module.analyze(data)
+        self.assertFalse(result["command_summary_complete"])
+        self.assertFalse(result["observed_bulk_sequence_contiguous"])
+        self.assertEqual(result["sequence_discontinuity_count"], 1)
+        self.assertIsNone(result["streams_by_flags"]["0x00"]["opcodes"])
+        self.assertIsNone(result["streams_by_flags"]["0x00"]["contains_eeprom_write_opcode"])
+
+    def test_repeated_sequence_is_not_trusted(self):
+        frame = event(struct.pack("<I", 0x00270001))
+        result = module.analyze(capture(*([frame] * 40)))
+        self.assertEqual(result["sequence_discontinuity_count"], 39)
+        self.assertEqual(len(result["sequence_discontinuities_first_32"]), 32)
+        self.assertFalse(result["capture_completeness_verified"])
 
     def test_control_metadata_does_not_expose_payload(self):
         secret = b"private-firmware-bytes"

@@ -14,7 +14,15 @@ header is redistributed. Synthetic test bytes are constructed for parser tests.
 They are not captured Apollo descriptors or evidence of device support.
 
 Universal Audio, Apollo and UAD are marks of Universal Audio. macOS and Apple Silicon
-are marks of Apple. No affiliation or endorsement is claimed. A future investigation
-may require firmware/DSP assets from the owner's own lawful UAD installation; none
-is downloaded, supplied or redistributed by this project. USB capture files may
+are marks of Apple. No affiliation or endorsement is claimed. Firmware/DSP assets
+come only from the owner's own lawful UAD installation. They are not fetched from
+third-party repositories or redistributed by this project. USB capture files may
 contain those assets and should remain private.
+
+Owner-supplied firmware attachments are inspected privately in the cloud; they are
+not committed to Git, included in Actions artifacts or used as public test fixtures.
+Published hashes, sizes and section addresses are metadata, not firmware payloads.
+
+The non-macOS offline SHA-256 backend vendors PicoSHA2 by okdshin under the MIT
+license; see third_party/README.md and third_party/PicoSHA2-LICENSE. The header
+retains its original copyright/license notice. The macOS backend uses CommonCrypto.

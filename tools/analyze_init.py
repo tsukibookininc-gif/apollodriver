@@ -18,6 +18,25 @@ MAX_BYTES = 64 * 1024 * 1024
 EVENT = struct.Struct("<IHBBBBHHH")
 
 
+class CommandSummary:
+    """Count command headers without retaining proprietary payload words in memory."""
+    def __init__(self):
+        self.dwords = 0
+        self.remaining = 0
+        self.opcodes = collections.Counter()
+
+    def feed(self, payload):
+        for word, in struct.iter_unpack("<I", payload):
+            if self.remaining:
+                self.remaining -= 1
+                continue
+            length = word & 0xFFFF
+            if not length:
+                raise ValueError("zero-length bulk command")
+            self.opcodes[f"0x{word >> 16:04x}"] += 1
+            self.remaining = length - 1
+
+
 def analyze(data):
     if len(data) > MAX_BYTES:
         raise ValueError("input exceeds 64 MiB limit")
@@ -32,9 +51,12 @@ def analyze(data):
     phases = collections.Counter()
     # Separate flag streams: Twin captures include flag 0x10 of unknown meaning.
     # Wordcounts are followed across frame boundaries, not guessed at each frame.
-    streams = collections.defaultdict(list)
+    streams = collections.defaultdict(CommandSummary)
+    previous_sequence = None
+    discontinuities = []
+    discontinuity_count = 0
     duration_us = 0
-    for _ in range(count):
+    for event_index in range(count):
         if len(data) - offset < EVENT.size:
             raise ValueError("truncated APLO2 event header")
         delta, phase, kind, request_type, request, reserved, value, index, size = EVENT.unpack_from(data, offset)
@@ -52,8 +74,18 @@ def analyze(data):
                 raise ValueError("invalid host-to-device bulk frame")
             if (request_type, request, value, index) != (0, 0, 0, 0):
                 raise ValueError("bulk event has nonzero control fields")
-            words = struct.unpack_from(f"<{payload[0]}I", payload, 4)
-            streams[payload[1]].extend(words)
+            sequence = payload[2]
+            if previous_sequence is not None and sequence != (previous_sequence + 1) % 256:
+                discontinuity_count += 1
+                if len(discontinuities) < 32:
+                    discontinuities.append({"event": event_index, "phase": phase,
+                                            "expected": (previous_sequence + 1) % 256,
+                                            "observed": sequence})
+            previous_sequence = sequence
+            stream = streams[payload[1]]
+            stream.dwords += payload[0]
+            if not discontinuity_count:
+                stream.feed(payload[4:])
             bulk_count += 1
         elif kind == 1:
             if request_type not in (0x40, 0x41):
@@ -65,20 +97,13 @@ def analyze(data):
     if offset != len(data):
         raise ValueError("trailing bytes after declared APLO2 events")
     decoded = {}
-    for flags, words in streams.items():
-        cursor = 0
-        opcodes = collections.Counter()
-        while cursor < len(words):
-            word = words[cursor]
-            length = word & 0xFFFF
-            if length == 0 or length > len(words) - cursor:
-                raise ValueError(f"zero-length or truncated bulk command in flags {flags:#x}")
-            opcodes[f"0x{word >> 16:04x}"] += 1
-            cursor += length
+    for flags, stream in streams.items():
+        if not discontinuity_count and stream.remaining:
+            raise ValueError(f"truncated bulk command in flags {flags:#x}")
         decoded[f"0x{flags:02x}"] = {
-            "dwords": len(words),
-            "opcodes": dict(sorted(opcodes.items())),
-            "contains_eeprom_write_opcode": bool(opcodes.get("0x0013")),
+            "dwords": stream.dwords,
+            "opcodes": dict(sorted(stream.opcodes.items())) if not discontinuity_count else None,
+            "contains_eeprom_write_opcode": bool(stream.opcodes.get("0x0013")) if not discontinuity_count else None,
             "flags_semantics_verified": flags == 0,
         }
     return {
@@ -91,6 +116,12 @@ def analyze(data):
         "phases": dict(sorted(phases.items())),
         "encoded_duration_us": duration_us,
         "streams_by_flags": decoded,
+        "observed_bulk_sequence_contiguous": not discontinuity_count,
+        "sequence_discontinuity_count": discontinuity_count,
+        "sequence_discontinuities_first_32": discontinuities,
+        "command_summary_complete": not discontinuity_count,
+        "capture_completeness_verified": False,
+        "sequence_note": "Host bulk sequence is compared modulo 256 across flags. A gap or reset withholds command summaries; it does not prove packet loss.",
         "device_model_verified": False,  # APLO2 has no VID/PID/model/firmware identity.
         "replay_safe": False,
         "hardware_audio_verified": False,

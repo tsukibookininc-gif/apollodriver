@@ -3,6 +3,8 @@
 Проверено 16 ноября 2026. База протокола зафиксирована на open-apollo
 [`6e0c5953c0f334dec17bcf0b34261263cad8acfd`](https://github.com/rolotrealanis98/open-apollo/tree/6e0c5953c0f334dec17bcf0b34261263cad8acfd).
 Это источники реализации и выводов, а не заявление о совместимости Twin X с macOS.
+Дополнительные источники аппаратуры и анализа Windows/macOS перечислены в
+[HARDWARE.md](HARDWARE.md); проверка нашего кода — в [AUDIT.md](AUDIT.md).
 
 ## Исходники open-apollo — GPL-2.0
 
@@ -10,7 +12,7 @@
 | --- | --- | --- |
 | [README](https://github.com/rolotrealanis98/open-apollo/blob/6e0c5953c0f334dec17bcf0b34261263cad8acfd/README.md) | Заявленный статус моделей и USB-стека | Отчёты авторов, не наши измерения |
 | [uausb/device.py](https://github.com/rolotrealanis98/open-apollo/blob/6e0c5953c0f334dec17bcf0b34261263cad8acfd/tools/uausb/device.py) | Vendor IN 00/04/06/0E/0F, 36-байтный статус, boot word 1069 | Сам upstream помечает этот слой как не проверенный на устройстве |
-| [fx3-load.py](https://github.com/rolotrealanis98/open-apollo/blob/6e0c5953c0f334dec17bcf0b34261263cad8acfd/tools/fx3-load.py) | VID 2B5A, Twin X loader PID 000E, схема загрузки FX3 | Здесь загрузчик не реализован и не запущен |
+| [fx3-load.py](https://github.com/rolotrealanis98/open-apollo/blob/6e0c5953c0f334dec17bcf0b34261263cad8acfd/tools/fx3-load.py) | VID 2B5A, Twin X loader PID 000E, схема загрузки FX3 | Отдельный Mac RAM boot эксперимент подготовлен, но на карте не запущен |
 | [usb-full-init.py](https://github.com/rolotrealanis98/open-apollo/blob/6e0c5953c0f334dec17bcf0b34261263cad8acfd/tools/usb-full-init.py) | Runtime PID 000F, проблемы инициализации Solo/Twin | Последовательность Solo не считается пригодной для Twin X |
 | [uausb/dspcmd.py](https://github.com/rolotrealanis98/open-apollo/blob/6e0c5953c0f334dec17bcf0b34261263cad8acfd/tools/uausb/dspcmd.py) | Bulk header, wordcount и opcode DSP-команд | Используется только для офлайн-анализа, без отправки |
 | [pcap-init-extract.py](https://github.com/rolotrealanis98/open-apollo/blob/6e0c5953c0f334dec17bcf0b34261263cad8acfd/tools/usb-re/pcap-init-extract.py) | Формат APLO2: magic + count, 16-байтные заголовки событий | APLO2 не содержит проверяемой идентичности модели/прошивки |
@@ -33,6 +35,11 @@
   сообщается о Thunderbolt x4 на M2 Ultra под Linux; это другой транспорт, чип и ОС.
 
 ## Первичные документы Apple, Universal Audio и GitHub
+
+- [Infineon AN76405, sections 4.2.10–4.4](https://www.infineon.com/assets/row/public/documents/30/42/infineon-an76405--ez-usb-fx3-fx3s-boot-options-applicationnotes-en.pdf):
+  B0 boot image, checksum words, RAM addresses, A0 writes/readback/jump и 4 KiB limit.
+- [Infineon FX3 memory map](https://community.infineon.com/t5/Knowledge-Base-Articles/Modifying-the-Default-Memory-Map-in-FX3-CX3-FX3S-SD3-FX2G2-and-SD2/ta-p/249462):
+  ITCM отдельно от 256/512 KiB SRAM. [Применение к собственному файлу](BOOT_EXPERIMENT.md).
 
 - [Apple: Working With USB Device Interfaces](https://developer.apple.com/library/archive/documentation/DeviceDrivers/Conceptual/USBBook/USBDeviceInterfaces/USBDevInterfaces.html):
   IOUSBLib discovery, COM interfaces, opening interfaces. В этой реализации

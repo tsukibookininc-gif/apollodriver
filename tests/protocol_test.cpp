@@ -26,6 +26,11 @@ int main() {
         require(unhex("ab CD\n00") == Bytes({0xab, 0xcd, 0}));
         rejects([] { unhex("abc"); });
         rejects([] { unhex("0x12"); });
+        require(parse_location("0xFFFFFFFF") == UINT32_MAX);
+        require(parse_location("0Xabcdef01") == 0xabcdef01);
+        require(parse_location("00000000") == 0);
+        for (const char* bad : {"", "0x", " -0", " -1", "+1", " 1", "1 ", "1\n", "100000000", "-1"})
+            rejects([=] { parse_location(bad); });
         rejects([] { le32({}, 0); });
         rejects([] { le32({1, 2, 3, 4}, SIZE_MAX); });
         for (auto kind : {Read::protocol, Read::status, Read::version_a, Read::version_b, Read::dsp0_boot}) {
@@ -48,17 +53,46 @@ int main() {
         require(decode_read(Read::dsp0_boot, unhex("030c0000")).find("\"ready_bit_by_upstream_rule\":true") != std::string::npos);
         auto status = unhex("4a4b2b2a0200000080bb000003000000160000000a000000000000000000000000000000");
         require(decode_read(Read::status, status).find("\"sample_rate\":48000") != std::string::npos);
+        unsigned calls = 0;
+        auto failed_read = read_known_status([&](Read) -> Bytes {
+            ++calls;
+            throw std::runtime_error("synthetic USB timeout");
+        });
+        require(!failed_read.complete && calls == 1);
+        require(failed_read.json.find("stopped_after_error") != std::string::npos);
+        calls = 0;
+        auto short_read = read_known_status([&](Read) {
+            ++calls;
+            return Bytes{0};
+        });
+        require(!short_read.complete && calls == 1);
+        calls = 0;
+        auto bad_magic = read_known_status([&](Read kind) {
+            ++calls;
+            return Bytes(request_for(kind).length, 0);
+        });
+        require(!bad_magic.complete && calls == 2);
+        calls = 0;
+        auto complete_read = read_known_status([&](Read kind) {
+            ++calls;
+            return kind == Read::status ? status : Bytes(4, 0);
+        });
+        require(complete_read.complete && calls == 5);
         status[0] = 0;
         rejects([&] { decode_read(Read::status, status); });
         // Synthetic configuration, NOT a captured Apollo descriptor.
-        auto config = unhex("09021f00010100803209040201010102000007050305c0000106300100c000");
+        auto config = unhex("09021f00010100803209040200010102000007050305c0000106300100c000");
         auto parsed = decode_configuration(config);
+        require(configuration_evidence(config).valid);
         require(parsed.find("\"address\":\"0x03\"") != std::string::npos);
         require(parsed.find("\"transfer\":\"isochronous\"") != std::string::npos);
         require(parsed.find("\"bytes_per_interval\":192") != std::string::npos);
         for (std::size_t n = 0; n < config.size(); ++n)
             rejects([&] { decode_configuration(Bytes(config.begin(), config.begin() + n)); });
         auto bad = config; bad[9] = 0;
+        auto evidence = configuration_evidence(bad);
+        require(!evidence.valid && evidence.json.find(hex_bytes(bad)) != std::string::npos);
+        require(evidence.json.find("parse_error") != std::string::npos);
         rejects([&] { decode_configuration(bad); });
         bad = config; bad[18] = 255;
         rejects([&] { decode_configuration(bad); });
