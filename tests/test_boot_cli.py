@@ -32,12 +32,20 @@ class BootCliTests(unittest.TestCase):
             result = self.run_cli('--image', str(image), '--execute', '--location', '01100000', '--confirm-twin-x-ram-boot')
             self.assertEqual(result.returncode, 1)
             self.assertIn('not the pinned ApolloTwinX.bin; no device opened', result.stderr)
+            result = self.run_cli('--image', str(image), '--write-verify-only', '--location', '01100000', '--confirm-twin-x-ram-write')
+            self.assertEqual(result.returncode, 1)
+            self.assertIn('not the pinned ApolloTwinX.bin; no device opened', result.stderr)
 
     def test_incomplete_execution_and_conflicting_flags_fail_before_file_open(self):
         for args in [[], ['--execute'], ['--confirm-twin-x-ram-boot'], ['--location', '0x01100000'],
                      ['--execute', '--location', '01100000'], ['--execute', '--confirm-twin-x-ram-boot'],
                      ['--plan', '--execute', '--location', '01100000', '--confirm-twin-x-ram-boot'],
-                     ['--location', ' -0'], ['--execute', '--execute']]:
+                     ['--location', ' -0'], ['--execute', '--execute'],
+                     ['--write-verify-only'], ['--confirm-twin-x-ram-write'],
+                     ['--write-verify-only', '--location', '01100000', '--confirm-twin-x-ram-boot'],
+                     ['--write-verify-only', '--confirm-twin-x-ram-write'],
+                     ['--write-verify-only', '--plan', '--location', '01100000', '--confirm-twin-x-ram-write'],
+                     ['--execute', '--write-verify-only', '--location', '01100000', '--confirm-twin-x-ram-boot']]:
             with self.subTest(args=args):
                 result = self.run_cli('--image', 'nonexistent.bin', *args)
                 self.assertEqual(result.returncode, 1)

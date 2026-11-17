@@ -31,6 +31,9 @@ It does not make the device appear in UA Connect or UAD Console. No audio succes
   default; explicit confirmed execution can write only the pinned Twin X image to
   FX3 RAM, verify every chunk by readback and observe re-enumeration. Hardware
   execution has not been approved or tested. See [the experiment](docs/BOOT_EXPERIMENT.md).
+  A separately confirmed `--write-verify-only` stage stops after RAM readback;
+  entrypoint requests are also denied in its native USB adapter. It still writes
+  device memory and is untested on hardware, not a read-only diagnostic mode.
 
 The default scan only reads OS properties; it does not open the USB interface or
 send USB commands. `--descriptors` reads the OS-cached descriptors through IOUSBLib

@@ -113,7 +113,17 @@ std::string fx3_plan(const Bytes& data) {
     return out.str();
 }
 
-void transfer_fx3_ram(const Bytes& data, const Fx3Control& control, Fx3Progress& progress) {
+bool fx3_request_allowed(const Fx3Request& r, const Fx3Image& image, bool allow_jump) {
+    const auto address = std::uint32_t(r.value) | (std::uint32_t(r.index) << 16);
+    if ((r.type != 0x40 && r.type != 0xc0) || r.request != 0xa0 || r.length > fx3_chunk_size) return false;
+    if (!r.length) return allow_jump && r.type == 0x40 && address == image.entrypoint;
+    if ((address & 3) || (r.length & 3)) return false;
+    return std::any_of(image.sections.begin(), image.sections.end(), [&](const auto& s) {
+        return address >= s.address && std::uint64_t(address) + r.length <= std::uint64_t(s.address) + s.length;
+    });
+}
+
+void transfer_fx3_ram(const Bytes& data, const Fx3Control& control, Fx3Progress& progress, bool execute_entrypoint) {
     // Parse the entire file and checksum before the first callback. Pinning is
     // also mandatory at the real macOS entry point; synthetic tests exercise
     // this sequencing function without pretending their bytes are UA firmware.
@@ -134,6 +144,7 @@ void transfer_fx3_ram(const Bytes& data, const Fx3Control& control, Fx3Progress&
             ++progress.readbacks_verified;
         }
     }
+    if (!execute_entrypoint) return;
     progress.jump_attempted = true;
     const auto jumped = control(request(0x40, image.entrypoint, 0), {});
     if (jumped.transferred || !jumped.data.empty()) throw std::runtime_error("invalid jump reply");

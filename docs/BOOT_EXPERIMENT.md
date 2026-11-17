@@ -90,6 +90,28 @@ hardware-записи и readback пока не выполнялся на Twin X
 
 ## Последствия и план восстановления
 
+### Промежуточный режим без entrypoint jump
+
+Подготовлен отдельный `--write-verify-only`. Он требует собственного флага
+`--confirm-twin-x-ram-write` и текущего `--location`, несовместим с `--execute`,
+`--plan` и подтверждением boot. Как и полный boot, он проверяет целый файл и
+идентичность устройства до первой записи, пишет только закреплённый image и
+сверяет все 38 RAM readbacks. После этого возвращается без zero-length запроса.
+В native USB adapter дополнительно запрещены все zero-length requests этого режима.
+
+Для exit 0 нужны завершение всех RAM writes/readbacks и наблюдение того же loader
+000E registry ID на том же location после закрытия handle. Это не подтверждение
+runtime, DSP или звука. JSON отдельно содержит entrypoint_execution_requested,
+ram_sequence_completed, loader_preserved, requested_stage_complete и jump progress.
+В write/verify-only режиме runtime_observed остаётся false.
+
+Это уменьшает объём первого активного эксперимента, но не исключает риск самой
+записи RAM или неожиданного поведения загрузчика. Hardware-проверки и согласия
+владельца пока нет. После теста планируется power cycle по инструкции ниже.
+Чтобы позднее исполнить firmware, потребуется отдельно согласованный полный
+boot с повторной загрузкой/проверкой; режима jump-only нет. Старые артефакты не
+получают новый режим автоматически; перед аппаратным тестом нужна сверка версии.
+
 Host-команды ограничены ITCM/SRAM и jump; EEPROM/SPI flash programmer, DSP init,
 clock/routing writes и дополнительные vendor commands отсутствуют. Но после jump
 исполняется оригинальный бинарный код UA: все его обращения к периферии не

@@ -67,24 +67,37 @@ int main() {
         const auto good = fixture();
         const auto image = apollo::parse_fx3(good);
         expect(image.sections.size() == 2 && image.entrypoint == 0x100);
+        const apollo::Fx3Request jump{0x40, 0xa0, 0x100, 0, 0};
+        expect(apollo::fx3_request_allowed(jump, image, true));
+        expect(!apollo::fx3_request_allowed(jump, image, false));
+        expect(!apollo::fx3_request_allowed({0xc0, 0xa0, 0x100, 0, 0}, image, true));
+        expect(!apollo::fx3_request_allowed({0x40, 0xa0, 0x104, 0, 0}, image, true));
+        expect(!apollo::fx3_request_allowed({0x40, 0xa2, 0x100, 0, 4}, image, false));
         expect(apollo::fx3_plan(good).find("\"pinned_twin_x\":false") != std::string::npos);
         rejects([&] { apollo::require_twin_x_image(good); });
         rejects([&] { apollo::require_twin_x_image(apollo::Bytes(147416, 0)); });
         SyntheticRam ram;
         apollo::Fx3Progress progress;
-        apollo::transfer_fx3_ram(good, [&](const auto& r, const auto& b) { return ram(r, b); }, progress);
+        apollo::transfer_fx3_ram(good, [&](const auto& r, const auto& b) { return ram(r, b); }, progress, true);
         expect(progress.writes_completed == 4 && progress.readbacks_verified == 4 && progress.jump_acknowledged);
         expect(ram.calls.size() == 9 && ram.calls[4].value == 0x0ff0 && ram.calls[4].index == 0x4001);
+        SyntheticRam verify_only;
+        apollo::transfer_fx3_ram(good, [&](const auto& r, const auto& b) {
+            expect(r.length > 0); // No zero-length jump can reach the transport.
+            return verify_only(r, b);
+        }, progress, false);
+        expect(verify_only.calls.size() == 8 && progress.writes_completed == 4);
+        expect(progress.readbacks_verified == 4 && !progress.jump_attempted && !progress.jump_acknowledged);
         for (unsigned failure = 1; failure <= 9; ++failure) {
             SyntheticRam faulty; faulty.fail_at = failure;
-            rejects([&] { apollo::transfer_fx3_ram(good, [&](const auto& r, const auto& b) { return faulty(r, b); }, progress); });
+            rejects([&] { apollo::transfer_fx3_ram(good, [&](const auto& r, const auto& b) { return faulty(r, b); }, progress, true); });
             expect(faulty.calls.size() == failure && !progress.jump_acknowledged);
             expect(progress.jump_attempted == (failure == 9));
         }
         for (unsigned mode = 0; mode < 3; ++mode) {
             SyntheticRam faulty;
             faulty.short_write = mode == 0; faulty.short_read = mode == 1; faulty.corrupt_read = mode == 2;
-            rejects([&] { apollo::transfer_fx3_ram(good, [&](const auto& r, const auto& b) { return faulty(r, b); }, progress); });
+            rejects([&] { apollo::transfer_fx3_ram(good, [&](const auto& r, const auto& b) { return faulty(r, b); }, progress, true); });
             expect(!progress.jump_attempted && faulty.calls.size() == (mode == 0 ? 1 : 2));
         }
         for (std::size_t n = 0; n < good.size(); ++n) {
@@ -97,7 +110,7 @@ int main() {
             unsigned callbacks = 0;
             rejects([&] { apollo::transfer_fx3_ram(bad, [&](const auto&, const auto&) {
                 ++callbacks; return apollo::Fx3Reply{0, {}};
-            }, progress); });
+            }, progress, true); });
             expect(callbacks == 0);
             expect(progress.writes_attempted == 0 && !progress.jump_attempted);
         }

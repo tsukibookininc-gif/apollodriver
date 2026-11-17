@@ -28,6 +28,7 @@ struct Fx3Request {
     std::uint16_t value = 0, index = 0, length = 0;
 };
 struct Fx3Reply { std::size_t transferred; Bytes data; };
+bool fx3_request_allowed(const Fx3Request& request, const Fx3Image& image, bool allow_jump);
 using Fx3Control = std::function<Fx3Reply(const Fx3Request&, const Bytes&)>;
 struct Fx3Progress {
     std::size_t writes_attempted = 0, writes_completed = 0, readbacks_verified = 0;
@@ -35,8 +36,8 @@ struct Fx3Progress {
 };
 // Injectable sequencing only. Native execution separately requires the pinned
 // Twin X image and explicit command-line confirmation before opening any device.
-void transfer_fx3_ram(const Bytes& data, const Fx3Control& control, Fx3Progress& progress);
+void transfer_fx3_ram(const Bytes& data, const Fx3Control& control, Fx3Progress& progress, bool execute_entrypoint);
 
 // macOS implementation; observes runtime identity, never claims working audio.
-std::string boot_mac(const Bytes& data, std::uint32_t location, bool& runtime_observed);
+std::string boot_mac(const Bytes& data, std::uint32_t location, bool execute_entrypoint, bool& stage_complete);
 }  // namespace apollo

@@ -61,9 +61,11 @@ std::vector<Match> matches(std::uint32_t location) {
 class BootDevice {
     IOUSBDeviceInterface500** value = nullptr;
     bool opened = false;
+    bool allow_jump = false;
     Fx3Image image;
 public:
-    BootDevice(io_service_t service, std::uint32_t location, Fx3Image parsed) : image(std::move(parsed)) {
+    BootDevice(io_service_t service, std::uint32_t location, Fx3Image parsed, bool execute_entrypoint)
+        : allow_jump(execute_entrypoint), image(std::move(parsed)) {
         IOCFPlugInInterface** plugin = nullptr;
         SInt32 score = 0;
         check(IOCreatePlugInInterfaceForService(service, kIOUSBDeviceUserClientTypeID, kIOCFPlugInInterfaceID,
@@ -103,18 +105,8 @@ public:
     BootDevice& operator=(const BootDevice&) = delete;
 
     Fx3Reply control(const Fx3Request& r, const Bytes& payload) {
-        const auto address = std::uint32_t(r.value) | (std::uint32_t(r.index) << 16);
-        if ((r.type != 0x40 && r.type != 0xc0) || r.request != 0xa0 || r.length > fx3_chunk_size)
+        if (!fx3_request_allowed(r, image, allow_jump))
             throw std::runtime_error("request outside FX3 RAM-boot policy");
-        if (r.length) {
-            const bool contained = std::any_of(image.sections.begin(), image.sections.end(), [&](const auto& s) {
-                return address >= s.address && std::uint64_t(address) + r.length <= std::uint64_t(s.address) + s.length;
-            });
-            if (!contained || (address & 3) || (r.length & 3))
-                throw std::runtime_error("request outside pinned image RAM sections");
-        } else if (r.type != 0x40 || address != image.entrypoint) {
-            throw std::runtime_error("only the pinned entrypoint may receive a zero-length request");
-        }
         if ((r.type == 0x40 && payload.size() != r.length) || (r.type == 0xc0 && !payload.empty()))
             throw std::runtime_error("invalid RAM control payload");
         Bytes buffer = r.type == 0xc0 ? Bytes(r.length) : payload;
@@ -133,11 +125,12 @@ public:
 };
 }  // namespace
 
-std::string boot_mac(const Bytes& data, std::uint32_t location, bool& runtime_observed) {
+std::string boot_mac(const Bytes& data, std::uint32_t location, bool execute_entrypoint, bool& stage_complete) {
     // Independently retain the content gate at the hardware entry point.
     require_twin_x_image(data);
     const auto image = parse_fx3(data);
-    runtime_observed = false;
+    stage_complete = false;
+    bool runtime_observed = false, sequence_complete = false, loader_preserved = false;
     Fx3Progress progress;
     std::string transfer_error, observation_error;
     std::uint64_t before_id = 0;
@@ -146,8 +139,9 @@ std::string boot_mac(const Bytes& data, std::uint32_t location, bool& runtime_ob
         if (before.size() != 1 || before.front().pid != twin_x_loader)
             throw std::runtime_error("need exactly one 2b5a:000e at the selected location; no device opened");
         before_id = before.front().registry_id;
-        BootDevice device(before.front().service.value, location, image);
-        transfer_fx3_ram(data, [&](const auto& r, const auto& payload) { return device.control(r, payload); }, progress);
+        BootDevice device(before.front().service.value, location, image, execute_entrypoint);
+        transfer_fx3_ram(data, [&](const auto& r, const auto& payload) { return device.control(r, payload); }, progress, execute_entrypoint);
+        sequence_complete = true;
     } catch (const std::exception& error) {
         transfer_error = error.what();
     }
@@ -168,8 +162,24 @@ std::string boot_mac(const Bytes& data, std::uint32_t location, bool& runtime_ob
             observation_error = error.what();
         }
     }
+    if (!execute_entrypoint && sequence_complete) {
+        try {
+            const auto after = matches(location);
+            loader_preserved = after.size() == 1 && after.front().pid == twin_x_loader && after.front().registry_id == before_id;
+        } catch (const std::exception& error) {
+            observation_error = error.what();
+        }
+    }
+    stage_complete = execute_entrypoint ? runtime_observed : sequence_complete && loader_preserved;
+    std::size_t expected_chunks = 0;
+    for (const auto& section : image.sections)
+        expected_chunks += (section.length + fx3_chunk_size - 1) / fx3_chunk_size;
+    const bool ram_verified = progress.writes_completed == expected_chunks && progress.readbacks_verified == expected_chunks;
     std::ostringstream out;
-    out << "{\"schema_version\":1,\"mode\":\"explicit_fx3_ram_boot\",\"image_sha256\":" << quote(sha256(data))
+    out << "{\"schema_version\":1,\"mode\":"
+        << quote(execute_entrypoint ? "explicit_fx3_ram_boot" : "explicit_fx3_ram_write_verify_only")
+        << ",\"entrypoint_execution_requested\":" << (execute_entrypoint ? "true" : "false")
+        << ",\"image_sha256\":" << quote(sha256(data))
         << ",\"location\":" << quote(hex(location, 8))
         << ",\"progress\":{\"writes_attempted\":" << progress.writes_attempted
         << ",\"writes_completed\":" << progress.writes_completed
@@ -177,6 +187,9 @@ std::string boot_mac(const Bytes& data, std::uint32_t location, bool& runtime_ob
         << ",\"jump_attempted\":" << (progress.jump_attempted ? "true" : "false")
         << ",\"jump_acknowledged\":" << (progress.jump_acknowledged ? "true" : "false") << '}'
         << ",\"runtime_observed\":" << (runtime_observed ? "true" : "false")
+        << ",\"ram_sequence_completed\":" << (ram_verified ? "true" : "false")
+        << ",\"loader_preserved\":" << (loader_preserved ? "true" : "false")
+        << ",\"requested_stage_complete\":" << (stage_complete ? "true" : "false")
         << ",\"transfer_error\":" << (transfer_error.empty() ? "null" : quote(transfer_error))
         << ",\"observation_error\":" << (observation_error.empty() ? "null" : quote(observation_error))
         << ",\"audio_streaming_implemented\":false,\"hardware_audio_verified\":false}";
