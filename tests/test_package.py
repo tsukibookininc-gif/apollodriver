@@ -36,6 +36,19 @@ class PackageTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     module.package(module.ROOT / "build/apollo-inspect", Path(folder) / "test.tar.gz", commit, platform, "ARM64")
 
+    def test_boot_archive_is_distinct_and_declares_write_capability(self):
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "boot.tar.gz"
+            module.package(module.ROOT / "build/apollo-boot", output, "a" * 40, "test-host", "test-arch", "apollo-boot")
+            with tarfile.open(output) as archive:
+                self.assertEqual(set(archive.getnames()), {"apollo-boot", "BOOT_EXPERIMENT.md", "LICENSE", "BUILDINFO.json", "SHA256SUMS"})
+                self.assertEqual(archive.getmember("apollo-boot").mode, 0o755)
+                self.assertIn(b"Copyright (c) 2017 okdshin", archive.extractfile("LICENSE").read())
+                info = json.load(archive.extractfile("BUILDINFO.json"))
+                self.assertTrue(info["device_writes_implemented"])
+                self.assertEqual(info["default_mode"], "offline_plan")
+                self.assertFalse(info["hardware_audio_verified"])
+
 
 if __name__ == "__main__":
     unittest.main()

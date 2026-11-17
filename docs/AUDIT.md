@@ -92,3 +92,29 @@ after multiple attempts». Его Linux/macOS 26 jobs прошли. Это ин�
 Облако не проверяет USBDeviceOpen/USBInterfaceOpen с Twin X, фактический control
 transfer, hot-unplug устройства и звук. В первом пользовательском тесте используются
 IORegistry и cached descriptors, без status requests, установки или изменения безопасности.
+
+## Отдельный FX3 RAM boot эксперимент
+
+17 ноября 2026 подготовлен отдельный `apollo-boot`, описанный в
+[BOOT_EXPERIMENT.md](BOOT_EXPERIMENT.md). Предыдущие ограничения выше относятся
+к проверявшемуся apollo-inspect; этот диагностический инструмент не получил OUT-запросов.
+
+Новый код целиком проверяет CY/B0 image, word lengths, checksum, неперекрывающиеся
+разрешённые RAM ranges и entrypoint. Выполнение допускается только при совпадении
+всего файла с Twin X SHA256 pin, после явных CLI флагов и выбора текущего location.
+Перед первой записью повторно проверяются VID/PID/location. После каждой записи
+сверяются точная длина и полный readback. Ошибки не приводят к retry или jump.
+Jump — отдельный zero-length запрос, его ACK не считается подтверждением runtime.
+
+В Linux-облаке: 28 Python-тестов (1 macOS-only skip), 1425 protocol checks,
+8448 boot checks и по 10000 malformed-input случаев для обоих parsers проходят.
+GCC -fanalyzer и ASan/UBSan проходят. SHA проверен на опубликованных NIST-векторах;
+результат на присланном образе отдельно совпал с Python hashlib и upstream pin.
+Неверная модель отвергнута. Fuzz cases включают случайные байты и мутации валидной
+синтетической структуры. Fault injection проверяет остановку на каждом transfer,
+short replies и неверном readback, без USB и без firmware payloads в тестах.
+
+macOS CI должен отдельно собрать новый IOUSBLib код и проверить CommonCrypto,
+Clang Static Analyzer, sanitizers и архив. Ни эти checks, ни облачный разбор файла
+не проверяют настоящие RAM writes/readbacks, USB hot-unplug или исполнение firmware.
+Согласия на hardware-запуск пока нет; на карту ничего не отправлено.

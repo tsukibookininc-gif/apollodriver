@@ -27,6 +27,10 @@ It does not make the device appear in UA Connect or UAD Console. No audio succes
   unknown data. This cannot establish that the original capture is complete.
 - Offline descriptor/status decoders and protocol tests. Tests use synthetic data,
   not an attached Apollo and not proof of audio functionality.
+- Separate experimental `apollo-boot`: offline CY image/checksum/SHA256 plan by
+  default; explicit confirmed execution can write only the pinned Twin X image to
+  FX3 RAM, verify every chunk by readback and observe re-enumeration. Hardware
+  execution has not been approved or tested. See [the experiment](docs/BOOT_EXPERIMENT.md).
 
 The default scan only reads OS properties; it does not open the USB interface or
 send USB commands. `--descriptors` reads the OS-cached descriptors through IOUSBLib
@@ -41,6 +45,7 @@ The macOS jobs compile the real Apple backend and save an ad-hoc signed research
 CLI `.tar.gz` artifact with executable mode, archive-relative SHA256SUMS,
 source commit metadata, license and [first-test instructions](docs/FIRST_TEST.md).
 There is no installer, system extension, daemon or background service.
+The RAM boot tool is packaged separately; the diagnostic archive does not contain it.
 Cloud CI has **no Apollo attached**. Its success cannot verify USB transfers or audio.
 
 ```sh
@@ -51,6 +56,8 @@ make analyze
 Native macOS builds need Apple's Command Line Tools and system frameworks only;
 there is no Homebrew/libusb/Python dependency in the native USB executable.
 Linux builds provide the offline decoders and intentionally refuse live macOS scans.
+macOS boot hashing uses built-in CommonCrypto. Non-macOS offline builds use the
+vendored MIT-licensed PicoSHA2 header; no extra package installation is required.
 
 Examples of offline use (HEX is data supplied by the researcher):
 
@@ -86,8 +93,10 @@ the raw configuration and a parse error as JSON, with exit `2` when invalid.
 The macOS cached-descriptor mode also preserves parse errors and bytes; combined
 descriptor/status mode does not issue status reads after descriptor validation fails.
 
-No firmware uploader, DSP initializer, arbitrary request sender or audio stream is
-included. The Solo initialization must not be replayed on Twin X as a shortcut.
+The read-only `apollo-inspect` has no firmware uploader. The separate, opt-in
+RAM boot experiment is limited to a pinned Twin X image; it is not a flash/EEPROM
+programmer. No DSP initializer, arbitrary request sender or audio stream is included.
+The Solo initialization must not be replayed on Twin X as a shortcut.
 Any future device write, installation or security change needs a separate review
 and the owner's agreement. Do not disable Gatekeeper/SIP or lower boot security.
 
